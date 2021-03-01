@@ -1,54 +1,67 @@
+import java.io.BufferedReader
 import java.io.File
-import java.io.FileInputStream
-import java.net.URL
-import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
+import java.io.InputStream
+import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
-
-fun String.asResourceUrl() : URL? {
-    val classloader = Thread.currentThread().contextClassLoader
-    return classloader.getResource("names")
-}
+import kotlin.system.exitProcess
 
 val workingDir: File = File(System.getProperty("user.dir"))
 
-fun String.runCommand(workingDir: File) {
-    ProcessBuilder(*split(" ").toTypedArray())
+fun String.asResourceStream(): InputStream? {
+    val classloader = Thread.currentThread().contextClassLoader
+    return classloader.getResourceAsStream(this)
+}
+
+fun commit(subj: String) {
+    val command = "git commit -am"
+    var cmdArgs = command.split(" ").toTypedArray() + subj
+    ProcessBuilder(*cmdArgs)
         .directory(workingDir)
         .redirectOutput(ProcessBuilder.Redirect.INHERIT)
         .redirectError(ProcessBuilder.Redirect.INHERIT)
         .start()
-        .waitFor(60, TimeUnit.MINUTES)
+        .waitFor(1, TimeUnit.SECONDS)
 }
 
-fun commit(subj: String) {
-    "git commit -am $subj".runCommand(workingDir)
-}
-
-fun getLines(sourcePath: String, targetPath: String) {
-
-}
-
-private fun getLastLine(filePath: String) : String {
-    val fileInputStream = FileInputStream(filePath)
-    val channel = fileInputStream.channel
-    val buffer: ByteBuffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, channel.size())
-    buffer.position(channel.size().toInt())
-    var builder: StringBuilder? = StringBuilder()
-    for (i in channel.size() - 1 downTo 0) {
-        val c = buffer.get(i.toInt()).toChar()
-        builder!!.append(c)
-        if (c == '\n') {
-            builder.reverse()
-            break
-        }
+fun getLines(targetFile: File, amount: Int): Pair<List<String>, Int> {
+    val targetEndLine = getLastLine(targetFile)
+    val source = "names".asResourceStream()!!
+    val namesList = BufferedReader(InputStreamReader(source)).readLines()
+    var begin = namesList.indexOf(targetEndLine)
+    if (begin == -1) {
+        begin = 0
+    } else {
+        ++begin
     }
-    return builder.toString()
+    val result = namesList.slice(begin until begin + amount)
+    return Pair(result, begin)
+}
+
+private fun getLastLine(file: File): String {
+    return file.readLines().last { it.isNotEmpty() }
 }
 
 fun main(args: Array<String>) {
-    val commitCreateAmount: Int = if (args.isNotEmpty()) {
-        args[0].toInt()
+    if (args.isEmpty()) {
+        println(
+            """
+            The test application that creates selected number of
+            commits in the target file using sample strings
+            from the source file
+
+            Wrong arguments. Example:
+                repop [file path] [commits amount]
+            """.trimIndent()
+        )
+        exitProcess(1)
+    }
+    val commitCreateAmount: Int = if (args.size == 2) {
+        args[1].toInt()
     } else 5
-    println(getLastLine("names".asResourceUrl().path))
+    val target = File(workingDir, args[0])
+    val (lines, amount) = getLines(target, commitCreateAmount)
+    for ((i, line) in lines.withIndex()) {
+        target.appendText(line + "\n")
+        commit("${i + amount}. $line")
+    }
 }
